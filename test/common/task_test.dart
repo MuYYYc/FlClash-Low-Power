@@ -131,6 +131,162 @@ void main() {
     expect(proxies['Selector']['all'], ['Beta']);
   });
 
+  test(
+    'buildGroups decodes shared members once with full field parity',
+    () async {
+      final proxies = <String, dynamic>{
+        'First': {
+          'name': 'First',
+          'type': 'Selector',
+          'now': 'Beta',
+          'hidden': true,
+          'testUrl': 'https://group.test',
+          'icon': 'first.svg',
+          'all': ['Beta', 'Nested', 'missing', 'Beta', 'Zulu'],
+        },
+        'Second': {
+          'name': 'Second',
+          'type': 'Fallback',
+          'all': ['Nested', 'Zulu', 'Beta'],
+        },
+        'Nested': {
+          'name': 'Nested',
+          'type': 'URLTest',
+          'now': 'Zulu',
+          'provider-name': 'group-provider',
+          'all': 'not a list',
+        },
+        'Beta': {
+          'name': 'Beta',
+          'type': 'Shadowsocks',
+          'provider-name': 'node-provider',
+        },
+        'Zulu': {'name': 'Zulu', 'type': 'Direct'},
+        'invalid': 'not a map',
+      };
+      final state = ComputeGroupsState(
+        proxiesData: ProxiesData(
+          all: const [
+            'First',
+            'Second',
+            'Nested',
+            'Beta',
+            'missing',
+            'invalid',
+          ],
+          proxies: proxies,
+        ),
+        sortType: ProxiesSortType.none,
+        delayMap: const {},
+        selectedMap: const {},
+        defaultTestUrl: '',
+      );
+      final input = jsonEncode(proxies);
+      final groups = await buildGroups(state);
+      const beta = Proxy(
+        name: 'Beta',
+        type: 'Shadowsocks',
+        providerName: 'node-provider',
+      );
+      const nested = Proxy(
+        name: 'Nested',
+        type: 'URLTest',
+        now: 'Zulu',
+        providerName: 'group-provider',
+      );
+      const zulu = Proxy(name: 'Zulu', type: 'Direct');
+
+      expect(groups, const [
+        Group(
+          name: 'First',
+          type: GroupType.Selector,
+          now: 'Beta',
+          hidden: true,
+          testUrl: 'https://group.test',
+          icon: 'first.svg',
+          all: [beta, nested, beta, zulu],
+        ),
+        Group(
+          name: 'Second',
+          type: GroupType.Fallback,
+          all: [nested, zulu, beta],
+        ),
+        Group(name: 'Nested', type: GroupType.URLTest, now: 'Zulu'),
+      ]);
+      expect(groups[0].all[0], same(groups[0].all[2]));
+      expect(groups[0].all[0], same(groups[1].all[2]));
+      expect(groups[0].all[1], same(groups[1].all[0]));
+      expect(groups[0].all[3], same(groups[1].all[1]));
+      expect(jsonEncode(proxies), input);
+
+      final repeated = await buildGroups(state);
+      expect(repeated, groups);
+      expect(repeated[0].all[0], isNot(same(groups[0].all[0])));
+      final changed = await buildGroups(
+        state.copyWith(
+          proxiesData: state.proxiesData.copyWith(
+            proxies: {
+              ...proxies,
+              'Beta': {
+                'name': 'Beta',
+                'type': 'Vmess',
+                'provider-name': 'updated-provider',
+              },
+            },
+          ),
+        ),
+      );
+      expect(
+        changed[0].all[0],
+        const Proxy(
+          name: 'Beta',
+          type: 'Vmess',
+          providerName: 'updated-provider',
+        ),
+      );
+      expect(changed[0].all[0], same(changed[1].all[2]));
+      expect(changed[0].all[0], isNot(same(groups[0].all[0])));
+    },
+  );
+
+  for (final sortType in ProxiesSortType.values) {
+    test(
+      'buildGroups preserves shared members with ${sortType.name} sort',
+      () async {
+        final groups = await buildGroups(
+          ComputeGroupsState(
+            proxiesData: ProxiesData(
+              all: const ['First', 'Second'],
+              proxies: {
+                for (final name in ['First', 'Second'])
+                  name: {
+                    'name': name,
+                    'type': 'Selector',
+                    'all': ['Zulu', 'Beta'],
+                  },
+                'Zulu': {'name': 'Zulu', 'type': 'Direct'},
+                'Beta': {'name': 'Beta', 'type': 'Direct'},
+              },
+            ),
+            sortType: sortType,
+            delayMap: const {
+              'https://default.test': {'Beta': 20, 'Zulu': 5},
+            },
+            selectedMap: const {},
+            defaultTestUrl: 'https://default.test',
+          ),
+        );
+
+        expect(groups.first.all.map((proxy) => proxy.name), switch (sortType) {
+          ProxiesSortType.none || ProxiesSortType.delay => ['Zulu', 'Beta'],
+          ProxiesSortType.name => ['Beta', 'Zulu'],
+        });
+        expect(groups[0].all[0], same(groups[1].all[0]));
+        expect(groups[0].all[1], same(groups[1].all[1]));
+      },
+    );
+  }
+
   test('toGroupsTask returns empty data without proxies', () async {
     final groups = await toGroupsTask(
       const ComputeGroupsState(

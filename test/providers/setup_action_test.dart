@@ -66,10 +66,17 @@ class _CappedDebounceSetupAction extends _UnflooredDebounceSetupAction {
 
 class TestCommonAction extends CommonAction {
   int trafficUpdates = 0;
+  int totalTrafficUpdates = 0;
+  int freshTrafficUpdates = 0;
 
   @override
-  Future<void> updateTraffic() async {
+  Future<void> updateTraffic({
+    bool includeTotal = true,
+    bool fresh = false,
+  }) async {
     trafficUpdates++;
+    if (includeTotal) totalTrafficUpdates++;
+    if (fresh) freshTrafficUpdates++;
   }
 }
 
@@ -384,6 +391,26 @@ void main() {
       expect(scoped.read(runTimeProvider), isNull);
     });
 
+    test('a stop requests a fresh full sample even while hidden', () async {
+      final (container: scoped, action: _) = buildScoped();
+      scoped.read(appVisibleProvider.notifier).value = false;
+      scoped
+          .read(appSettingProvider.notifier)
+          .update((state) => state.copyWith(showTrayTitle: false));
+      final setup = scoped.read(setupActionProvider.notifier);
+      final common =
+          scoped.read(commonActionProvider.notifier) as TestCommonAction;
+      await setup.setRunning(true);
+      expect(common.trafficUpdates, 0);
+
+      await setup.setRunning(false);
+
+      expect(common.trafficUpdates, 1);
+      expect(common.totalTrafficUpdates, 1);
+      expect(common.freshTrafficUpdates, 1);
+      expect(scoped.read(runTimeProvider), isNull);
+    });
+
     testWidgets('a restart cancels the pending traffic reset', (tester) async {
       final (container: scoped, action: stoppedAction) = buildScoped();
       final setup = scoped.read(setupActionProvider.notifier);
@@ -468,6 +495,10 @@ void main() {
         (scoped.read(commonActionProvider.notifier) as TestCommonAction)
             .trafficUpdates;
 
+    int totalTrafficUpdates() =>
+        (scoped.read(commonActionProvider.notifier) as TestCommonAction)
+            .totalTrafficUpdates;
+
     void setVisible(bool visible) =>
         scoped.read(appVisibleProvider.notifier).value = visible;
 
@@ -478,15 +509,18 @@ void main() {
 
       await tester.pump(const Duration(seconds: 2));
       expect(trafficUpdates(), 3);
+      expect(totalTrafficUpdates(), 3);
 
       setVisible(false);
       await tester.pump(const Duration(seconds: 5));
       expect(trafficUpdates(), 3);
+      expect(totalTrafficUpdates(), 3);
       expect(scoped.read(isStartProvider), isTrue);
 
       setVisible(true);
       await tester.pump();
       expect(trafficUpdates(), 4);
+      expect(totalTrafficUpdates(), 4);
       await tester.pump(const Duration(seconds: 1));
       expect(trafficUpdates(), 5);
 
@@ -528,6 +562,21 @@ void main() {
       await tester.pump(const Duration(seconds: 2));
 
       expect(trafficUpdates(), system.isMacOS ? 3 : 0);
+      expect(totalTrafficUpdates(), 0);
+
+      final hiddenRunTime = scoped.read(runTimeProvider);
+      await tester.pump(const Duration(seconds: 60));
+      expect(trafficUpdates(), system.isMacOS ? 63 : 0);
+      expect(totalTrafficUpdates(), 0);
+      expect(scoped.read(runTimeProvider), hiddenRunTime);
+      expect(scoped.read(isStartProvider), isTrue);
+
+      setVisible(true);
+      expect(trafficUpdates(), system.isMacOS ? 64 : 1);
+      expect(totalTrafficUpdates(), 1);
+      await tester.pump(const Duration(seconds: 1));
+      expect(trafficUpdates(), system.isMacOS ? 65 : 2);
+      expect(totalTrafficUpdates(), 2);
 
       await setup.setRunning(false);
       scoped.dispose();

@@ -1044,7 +1044,10 @@ class _RaceCommonAction extends CommonAction {
   int updateTrafficCount = 0;
 
   @override
-  Future<void> updateTraffic() async {
+  Future<void> updateTraffic({
+    bool includeTotal = true,
+    bool fresh = false,
+  }) async {
     updateTrafficCount++;
   }
 }

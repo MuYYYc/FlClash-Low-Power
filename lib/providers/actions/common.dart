@@ -3,7 +3,8 @@ part of '../action.dart';
 @Riverpod(keepAlive: true)
 class CommonAction extends _$CommonAction {
   CoreController get _core => ref.read(coreHandlerProvider);
-  bool _isUpdatingTraffic = false;
+  Future<void>? _trafficUpdate;
+  Future<void>? _totalTrafficUpdate;
   CancelToken? _updateCancelToken;
 
   @override
@@ -47,27 +48,59 @@ class CommonAction extends _$CommonAction {
     });
   }
 
-  Future<void> updateTraffic() async {
-    if (_isUpdatingTraffic) {
+  Future<void> updateTraffic({
+    bool includeTotal = true,
+    bool fresh = false,
+  }) async {
+    if (fresh) {
+      await Future.wait([
+        ?_trafficUpdate,
+        if (includeTotal) ?_totalTrafficUpdate,
+      ]);
+    }
+    if (!ref.mounted) {
       return;
     }
-    _isUpdatingTraffic = true;
-    try {
-      final onlyStatisticsProxy = ref.read(
-        appSettingProvider.select((state) => state.onlyStatisticsProxy),
-      );
-      final [traffic, totalTraffic] = await Future.wait([
-        _readTraffic(() => _core.getTraffic(onlyStatisticsProxy)),
-        _readTraffic(() => _core.getTotalTraffic(onlyStatisticsProxy)),
-      ]);
-      if (traffic != null) {
-        ref.read(trafficsProvider.notifier).addTraffic(traffic);
-      }
-      if (totalTraffic != null) {
-        ref.read(totalTrafficProvider.notifier).value = totalTraffic;
-      }
-    } finally {
-      _isUpdatingTraffic = false;
+    final onlyStatisticsProxy = ref.read(
+      appSettingProvider.select((state) => state.onlyStatisticsProxy),
+    );
+    final updates = <Future<void>>[];
+    if (_trafficUpdate == null) {
+      final update = _updateCurrentTraffic(
+        onlyStatisticsProxy,
+      ).whenComplete(() => _trafficUpdate = null);
+      _trafficUpdate = update;
+      updates.add(update);
+    } else if (fresh) {
+      updates.add(_trafficUpdate!);
+    }
+    if (includeTotal && _totalTrafficUpdate == null) {
+      final update = _updateTotalTraffic(
+        onlyStatisticsProxy,
+      ).whenComplete(() => _totalTrafficUpdate = null);
+      _totalTrafficUpdate = update;
+      updates.add(update);
+    } else if (includeTotal && fresh) {
+      updates.add(_totalTrafficUpdate!);
+    }
+    await Future.wait(updates);
+  }
+
+  Future<void> _updateCurrentTraffic(bool onlyStatisticsProxy) async {
+    final traffic = await _readTraffic(
+      () => _core.getTraffic(onlyStatisticsProxy),
+    );
+    if (ref.mounted && traffic != null) {
+      ref.read(trafficsProvider.notifier).addTraffic(traffic);
+    }
+  }
+
+  Future<void> _updateTotalTraffic(bool onlyStatisticsProxy) async {
+    final traffic = await _readTraffic(
+      () => _core.getTotalTraffic(onlyStatisticsProxy),
+    );
+    if (ref.mounted && traffic != null) {
+      ref.read(totalTrafficProvider.notifier).value = traffic;
     }
   }
 

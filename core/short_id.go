@@ -3,6 +3,7 @@ package core
 import (
 	"bytes"
 
+	"github.com/metacubex/mihomo/component/age"
 	"github.com/metacubex/mihomo/config"
 	"go.yaml.in/yaml/v3"
 )
@@ -10,13 +11,14 @@ import (
 // mihomo decodes an unquoted REALITY short-id as a YAML number (0123 is 83, 00
 // is 0); the scalar keeps its literal text, so retagging it restores the id.
 func unmarshalRawConfig(buf []byte) (*config.RawConfig, error) {
-	if !bytes.Contains(buf, []byte("short-id")) {
+	if !bytes.Contains(buf, []byte("short-id")) || bytes.HasPrefix(buf, []byte(age.FileHeader)) {
 		return config.UnmarshalRawConfig(buf)
 	}
 	var document yaml.Node
-	if yaml.Unmarshal(buf, &document) != nil || !retagShortIDs(&document) {
+	if yaml.Unmarshal(buf, &document) != nil {
 		return config.UnmarshalRawConfig(buf)
 	}
+	retagShortIDs(&document)
 	rawConfig := config.DefaultRawConfig()
 	if err := document.Decode(rawConfig); err != nil {
 		return nil, err

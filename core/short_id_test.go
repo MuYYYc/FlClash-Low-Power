@@ -1,9 +1,15 @@
 package core
 
 import (
+	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
+
+	"github.com/metacubex/mihomo/component/age"
+	"github.com/metacubex/mihomo/config"
 )
 
 func TestHandleGetConfigKeepsAnUnquotedShortIDAsWritten(t *testing.T) {
@@ -75,5 +81,52 @@ func TestHandleGetConfigLeavesProfilesWithoutShortIDsToMihomo(t *testing.T) {
 	}
 	if raw.MixedPort != 7899 || raw.Mode.String() == "" {
 		t.Errorf("raw config = port %d mode %q, want 7899 and the default mode", raw.MixedPort, raw.Mode)
+	}
+}
+
+func TestUnmarshalRawConfigMatchesMihomoWithoutNumericShortIDs(t *testing.T) {
+	for name, profile := range map[string]string{
+		"quoted":    `proxies: [{name: p, type: vless, reality-opts: {short-id: "0123"}}]`,
+		"hex":       `proxies: [{name: p, type: vless, reality-opts: {short-id: 0a1b}}]`,
+		"comment":   "# short-id is not configured\nmixed-port: 7899\n",
+		"empty":     "# short-id\n",
+		"null":      "null # short-id\n",
+		"scalar":    "not a config # short-id\n",
+		"malformed": "proxies: [ # short-id\n",
+		"duplicate": "mixed-port: 1\nmixed-port: 2 # short-id\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			want, wantErr := config.UnmarshalRawConfig([]byte(profile))
+			got, gotErr := unmarshalRawConfig([]byte(profile))
+			if !reflect.DeepEqual(got, want) || fmt.Sprint(gotErr) != fmt.Sprint(wantErr) {
+				t.Errorf("unmarshalRawConfig = (%#v, %v), want (%#v, %v)", got, gotErr, want, wantErr)
+			}
+		})
+	}
+}
+
+func TestUnmarshalRawConfigPreservesEncryptedProfiles(t *testing.T) {
+	secret, public, err := age.GenX25519KeyPair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	age.SetGlobalSecretKeys(secret)
+	t.Cleanup(func() { age.SetGlobalSecretKeys() })
+	encrypted, err := age.EncryptBytes([]byte("mixed-port: 7899\n"), public)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, profile := range map[string][]byte{
+		"encrypted":                       encrypted,
+		"encrypted with short-id comment": append(bytes.Clone(encrypted), []byte("# short-id\n")...),
+		"invalid armor":                   []byte(age.FileHeader + "\nshort-id\n"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			want, wantErr := config.UnmarshalRawConfig(profile)
+			got, gotErr := unmarshalRawConfig(profile)
+			if !reflect.DeepEqual(got, want) || fmt.Sprint(gotErr) != fmt.Sprint(wantErr) {
+				t.Errorf("unmarshalRawConfig = (%#v, %v), want (%#v, %v)", got, gotErr, want, wantErr)
+			}
+		})
 	}
 }

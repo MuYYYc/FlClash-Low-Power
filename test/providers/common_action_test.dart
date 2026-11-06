@@ -103,6 +103,197 @@ void main() {
       verify(() => core.getTotalTraffic(true)).called(1);
     });
 
+    test('a current-only sample leaves the total untouched', () async {
+      final container = buildContainer();
+      final before = container.read(totalTrafficProvider);
+      when(
+        () => core.getTraffic(any()),
+      ).thenAnswer((_) async => const Traffic(up: 1, down: 2));
+
+      await container
+          .read(commonActionProvider.notifier)
+          .updateTraffic(includeTotal: false);
+
+      expect(container.read(trafficsProvider).list.last.up, 1);
+      expect(container.read(totalTrafficProvider), before);
+      verifyNever(() => core.getTotalTraffic(any()));
+    });
+
+    test(
+      'a full sample adds a total read to an in-flight current read',
+      () async {
+        final container = buildContainer();
+        final current = Completer<Traffic>();
+        when(() => core.getTraffic(any())).thenAnswer((_) => current.future);
+        when(
+          () => core.getTotalTraffic(any()),
+        ).thenAnswer((_) async => const Traffic(up: 100));
+        final action = container.read(commonActionProvider.notifier);
+
+        final hidden = action.updateTraffic(includeTotal: false);
+        await action.updateTraffic();
+
+        expect(container.read(totalTrafficProvider), const Traffic(up: 100));
+        verify(() => core.getTraffic(any())).called(1);
+        verify(() => core.getTotalTraffic(any())).called(1);
+        current.complete(const Traffic(up: 1));
+        await hidden;
+        expect(container.read(trafficsProvider).list.last.up, 1);
+      },
+    );
+
+    test('a slow total read does not hold up later current samples', () async {
+      final container = buildContainer();
+      final total = Completer<Traffic>();
+      when(
+        () => core.getTraffic(any()),
+      ).thenAnswer((_) async => const Traffic(up: 1));
+      when(() => core.getTotalTraffic(any())).thenAnswer((_) => total.future);
+      final action = container.read(commonActionProvider.notifier);
+
+      final first = action.updateTraffic();
+      await Future<void>.delayed(Duration.zero);
+      await action.updateTraffic();
+
+      verify(() => core.getTraffic(any())).called(2);
+      verify(() => core.getTotalTraffic(any())).called(1);
+      total.complete(const Traffic(up: 100));
+      await first;
+    });
+
+    test(
+      'a fresh sample waits for in-flight reads then samples again',
+      () async {
+        final container = buildContainer();
+        final current = Completer<Traffic>();
+        final total = Completer<Traffic>();
+        when(() => core.getTraffic(any())).thenAnswer((_) => current.future);
+        when(() => core.getTotalTraffic(any())).thenAnswer((_) => total.future);
+        final action = container.read(commonActionProvider.notifier);
+
+        final first = action.updateTraffic();
+        final fresh = action.updateTraffic(fresh: true);
+        current.complete(const Traffic(up: 1));
+        await Future<void>.delayed(Duration.zero);
+        verify(() => core.getTraffic(any())).called(1);
+        verify(() => core.getTotalTraffic(any())).called(1);
+        when(
+          () => core.getTraffic(any()),
+        ).thenAnswer((_) async => const Traffic(up: 2));
+        when(
+          () => core.getTotalTraffic(any()),
+        ).thenAnswer((_) async => const Traffic(up: 200));
+        total.complete(const Traffic(up: 100));
+        await Future.wait([first, fresh]);
+
+        verify(() => core.getTraffic(any())).called(1);
+        verify(() => core.getTotalTraffic(any())).called(1);
+        expect(container.read(trafficsProvider).list.last.up, 2);
+        expect(container.read(totalTrafficProvider), const Traffic(up: 200));
+      },
+    );
+
+    for (final pendingTotal in [false, true]) {
+      test(
+        'a fresh current-only sample ignores a pending total: $pendingTotal',
+        () async {
+          final container = buildContainer();
+          final current = Completer<Traffic>();
+          final total = Completer<Traffic>();
+          when(() => core.getTraffic(any())).thenAnswer((_) => current.future);
+          when(
+            () => core.getTotalTraffic(any()),
+          ).thenAnswer((_) => total.future);
+          final action = container.read(commonActionProvider.notifier);
+          final old = action.updateTraffic(includeTotal: pendingTotal);
+          var completed = false;
+          final fresh = action
+              .updateTraffic(includeTotal: false, fresh: true)
+              .then((_) => completed = true);
+          when(
+            () => core.getTraffic(any()),
+          ).thenAnswer((_) async => const Traffic(up: 2));
+
+          current.complete(const Traffic(up: 1));
+          await Future<void>.delayed(Duration.zero);
+          final completedBeforeTotal = completed;
+          total.complete(const Traffic(up: 100));
+          await Future.wait([old, fresh]);
+
+          expect(completedBeforeTotal, isTrue);
+          expect(container.read(trafficsProvider).list.last.up, 2);
+          verify(() => core.getTraffic(any())).called(2);
+          if (pendingTotal) {
+            verify(() => core.getTotalTraffic(any())).called(1);
+          } else {
+            verifyNever(() => core.getTotalTraffic(any()));
+          }
+        },
+      );
+    }
+
+    test('concurrent fresh callers wait for their shared new sample', () async {
+      final container = buildContainer();
+      final oldCurrent = Completer<Traffic>();
+      final oldTotal = Completer<Traffic>();
+      final newCurrent = Completer<Traffic>();
+      final newTotal = Completer<Traffic>();
+      when(() => core.getTraffic(any())).thenAnswer((_) => oldCurrent.future);
+      when(
+        () => core.getTotalTraffic(any()),
+      ).thenAnswer((_) => oldTotal.future);
+      final action = container.read(commonActionProvider.notifier);
+      final old = action.updateTraffic();
+      var firstCompleted = false;
+      var secondCompleted = false;
+      final first = action.updateTraffic(fresh: true).then((_) {
+        firstCompleted = true;
+      });
+      final second = action.updateTraffic(fresh: true).then((_) {
+        secondCompleted = true;
+      });
+      when(() => core.getTraffic(any())).thenAnswer((_) => newCurrent.future);
+      when(
+        () => core.getTotalTraffic(any()),
+      ).thenAnswer((_) => newTotal.future);
+
+      oldCurrent.complete(const Traffic(up: 1));
+      oldTotal.complete(const Traffic(up: 100));
+      await old;
+      await Future<void>.delayed(Duration.zero);
+
+      verify(() => core.getTraffic(any())).called(2);
+      verify(() => core.getTotalTraffic(any())).called(2);
+      expect(firstCompleted, isFalse);
+      expect(secondCompleted, isFalse);
+      newCurrent.complete(const Traffic(up: 2));
+      await Future<void>.delayed(Duration.zero);
+      expect(firstCompleted, isFalse);
+      expect(secondCompleted, isFalse);
+      newTotal.complete(const Traffic(up: 200));
+      await Future.wait([first, second]);
+      expect(container.read(totalTrafficProvider), const Traffic(up: 200));
+    });
+
+    test('disposal drops pending results and a waiting fresh sample', () async {
+      final container = buildContainer();
+      final current = Completer<Traffic>();
+      final total = Completer<Traffic>();
+      when(() => core.getTraffic(any())).thenAnswer((_) => current.future);
+      when(() => core.getTotalTraffic(any())).thenAnswer((_) => total.future);
+      final action = container.read(commonActionProvider.notifier);
+
+      final first = action.updateTraffic();
+      final fresh = action.updateTraffic(fresh: true);
+      container.dispose();
+      current.complete(const Traffic(up: 1));
+      total.complete(const Traffic(up: 100));
+      await expectLater(Future.wait([first, fresh]), completes);
+
+      verify(() => core.getTraffic(any())).called(1);
+      verify(() => core.getTotalTraffic(any())).called(1);
+    });
+
     test('swallows a core failure and leaves the total untouched', () async {
       final container = buildContainer();
       final before = container.read(totalTrafficProvider);
@@ -128,6 +319,34 @@ void main() {
       expect(container.read(trafficsProvider).list.last.up, 1);
       expect(container.read(totalTrafficProvider), before);
     });
+
+    test(
+      'a failed query releases its in-flight guard for the next sample',
+      () async {
+        final container = buildContainer();
+        when(
+          () => core.getTraffic(any()),
+        ).thenThrow(StateError('current failed'));
+        when(
+          () => core.getTotalTraffic(any()),
+        ).thenThrow(StateError('total failed'));
+        final action = container.read(commonActionProvider.notifier);
+        await action.updateTraffic();
+        when(
+          () => core.getTraffic(any()),
+        ).thenAnswer((_) async => const Traffic(up: 1));
+        when(
+          () => core.getTotalTraffic(any()),
+        ).thenAnswer((_) async => const Traffic(up: 100));
+
+        await action.updateTraffic();
+
+        expect(container.read(trafficsProvider).list.last.up, 1);
+        expect(container.read(totalTrafficProvider), const Traffic(up: 100));
+        verify(() => core.getTraffic(any())).called(2);
+        verify(() => core.getTotalTraffic(any())).called(2);
+      },
+    );
 
     test(
       'drops concurrent in-flight updates while one is in progress',

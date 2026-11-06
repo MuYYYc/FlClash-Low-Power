@@ -52,7 +52,9 @@ class SetupAction extends _$SetupAction {
   void build() {
     ref.onDispose(_stopRuntimeTicker);
     ref.onDispose(() => _trafficResetTimer?.cancel());
-    ref.listen(appVisibleProvider, (_, _) => _syncRuntimeTicker());
+    ref.listen(appVisibleProvider, (_, visible) {
+      _syncRuntimeTicker(refresh: visible);
+    });
     ref.listen(
       appSettingProvider.select((state) => state.showTrayTitle),
       (_, _) => _syncRuntimeTicker(),
@@ -111,12 +113,15 @@ class SetupAction extends _$SetupAction {
     _syncRuntimeTicker();
   }
 
-  void _syncRuntimeTicker() {
+  void _syncRuntimeTicker({bool refresh = false}) {
     if (_startTime == null || !_isTrafficShown) {
       _stopRuntimeTicker();
       return;
     }
     if (_runtimeTimer != null) {
+      if (refresh) {
+        _refreshRunningState();
+      }
       return;
     }
     _refreshRunningState();
@@ -132,8 +137,15 @@ class SetupAction extends _$SetupAction {
   }
 
   void _refreshRunningState() {
-    _updateRunTime();
-    unawaited(ref.read(commonActionProvider.notifier).updateTraffic());
+    final visible = ref.read(appVisibleProvider);
+    if (visible) {
+      _updateRunTime();
+    }
+    unawaited(
+      ref
+          .read(commonActionProvider.notifier)
+          .updateTraffic(includeTotal: visible),
+    );
   }
 
   void _updateRunTime() {
@@ -242,7 +254,7 @@ class SetupAction extends _$SetupAction {
     if (!_isCurrent(request)) {
       return true;
     }
-    await ref.read(commonActionProvider.notifier).updateTraffic();
+    await ref.read(commonActionProvider.notifier).updateTraffic(fresh: true);
     if (ref.mounted && _isCurrent(request)) {
       _scheduleTrafficReset(request);
     }
