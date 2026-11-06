@@ -1,11 +1,11 @@
 import 'dart:async';
 
-import 'package:fl_clash/common/system.dart';
 import 'package:fl_clash/l10n/l10n.dart';
 import 'package:fl_clash/manager/locale_manager.dart';
 import 'package:fl_clash/manager/tray_manager.dart';
 import 'package:fl_clash/providers/providers.dart';
 import 'package:fl_clash/state.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -55,6 +55,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   late ProviderContainer container;
+  late List<String> trayCalls;
   late List<String> windowCalls;
 
   setUpAll(() async {
@@ -64,10 +65,14 @@ void main() {
   setUp(() {
     _RecordingSystemAction.updateTrayCount = 0;
     _RecordingSystemAction.updateTrayLocales.clear();
+    trayCalls = <String>[];
     windowCalls = <String>[];
     Tray.instance.resetForTesting();
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(_trayChannel, (call) async => true);
+        .setMockMethodCallHandler(_trayChannel, (call) async {
+          trayCalls.add(call.method);
+          return true;
+        });
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(_windowChannel, (call) async {
           windowCalls.add(call.method);
@@ -152,7 +157,7 @@ void main() {
     expect(windowCalls, containsAll(<String>['show', 'focus']));
   });
 
-  testWidgets('activating the macOS icon hides a visible window', (
+  testWidgets('activating the icon keeps a visible window shown', (
     tester,
   ) async {
     await pumpTrayManager(tester);
@@ -167,17 +172,36 @@ void main() {
     await tester.pumpAndSettle();
     await tester.pump(const Duration(seconds: 1));
 
-    expect(windowCalls, contains('hide'));
-    expect(windowCalls, isNot(contains('show')));
-  }, skip: !system.isMacOS);
+    expect(windowCalls, containsAll(<String>['show', 'focus']));
+    expect(windowCalls, isNot(contains('hide')));
+  });
 
   testWidgets('a menu request is forwarded to the tray', (tester) async {
-    await pumpTrayManager(tester);
+    final previousPlatform = debugDefaultTargetPlatformOverride;
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    try {
+      await pumpTrayManager(tester);
+      Tray.instance.resetForTesting();
+      final shown = Tray.instance.show(
+        const TraySpec(
+          icon: TrayIcon.asset('assets/images/tray/windows/status_1.ico'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await shown;
+      expect(Tray.instance.isVisible, isTrue);
+      trayCalls.clear();
+      windowCalls.clear();
 
-    await emitTrayEvent('onMenuRequested');
-    await tester.pumpAndSettle();
+      await emitTrayEvent('onMenuRequested');
+      await tester.pumpAndSettle();
 
-    expect(tester.takeException(), isNull);
+      expect(trayCalls, <String>['openMenu']);
+      expect(windowCalls, isEmpty);
+      expect(tester.takeException(), isNull);
+    } finally {
+      debugDefaultTargetPlatformOverride = previousPlatform;
+    }
   });
 
   testWidgets('a tray state change pushes the tray forward', (tester) async {

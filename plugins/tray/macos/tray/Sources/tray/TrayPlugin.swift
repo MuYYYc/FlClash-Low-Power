@@ -85,9 +85,14 @@ public class TrayPlugin: NSObject, FlutterPlugin {
     }
 
     private func makeStatusItem() -> TrayStatusItem? {
-        guard let item = TrayStatusItem(onMenuRequested: { [weak self] in
-            self?.channel.invokeMethod("onMenuRequested", arguments: nil)
-        }) else {
+        guard let item = TrayStatusItem(
+            onActivated: { [weak self] in
+                self?.channel.invokeMethod("onIconActivated", arguments: nil)
+            },
+            onMenuRequested: { [weak self] in
+                self?.channel.invokeMethod("onMenuRequested", arguments: nil)
+            }
+        ) else {
             return nil
         }
         statusItem = item

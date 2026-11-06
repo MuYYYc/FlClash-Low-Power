@@ -100,7 +100,7 @@ class _TrayManagerState extends ConsumerState<TrayManager> {
   void _handleTrayEvent(TrayEvent event) {
     switch (event) {
       case TrayIconActivated():
-        _reportFailure(system.isMacOS ? window?.toggle() : window?.show());
+        _reportFailure(window?.show());
       case TrayMenuRequested():
         _reportFailure(Tray.instance.openMenu());
       case TrayMenuItemSelected():

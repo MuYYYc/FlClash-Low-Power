@@ -17,6 +17,7 @@ File _resolveSource(String relativePath) {
 void main() {
   late String titleViewSource;
   late String statusItemSource;
+  late String pluginSource;
 
   setUpAll(() {
     titleViewSource = _resolveSource(
@@ -24,6 +25,9 @@ void main() {
     ).readAsStringSync();
     statusItemSource = _resolveSource(
       'macos/tray/Sources/tray/TrayStatusItem.swift',
+    ).readAsStringSync();
+    pluginSource = _resolveSource(
+      'macos/tray/Sources/tray/TrayPlugin.swift',
     ).readAsStringSync();
   });
 
@@ -71,4 +75,41 @@ void main() {
     expect(statusItemSource, contains('insertArrangedSubview'));
     expect(statusItemSource, contains('position == "trailing"'));
   });
+
+  test(
+    'macOS primary clicks activate while secondary clicks request a menu',
+    () {
+      expect(
+        statusItemSource,
+        contains('''
+    override func mouseDown(with event: NSEvent) {
+        if event.modifierFlags.contains(.control) {
+            onMenuRequested()
+        } else {
+            onActivated()
+        }
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        onMenuRequested()
+    }'''),
+      );
+      expect(
+        statusItemSource,
+        contains(
+          'TrayContentView(onActivated: onActivated, '
+          'onMenuRequested: onMenuRequested)',
+        ),
+      );
+      expect(pluginSource, contains('onActivated: { [weak self] in'));
+      expect(
+        pluginSource,
+        contains('invokeMethod("onIconActivated", arguments: nil)'),
+      );
+      expect(
+        pluginSource,
+        contains('invokeMethod("onMenuRequested", arguments: nil)'),
+      );
+    },
+  );
 }
