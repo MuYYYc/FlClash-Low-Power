@@ -2,8 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/widgets.dart';
 
-import 'inherited.dart';
-import 'route_motion_hold.dart';
+import 'package:prism_ui/inherited.dart';
+import 'package:prism_ui/route_motion_hold.dart';
 
 mixin ActiveRefreshMixin<T extends StatefulWidget>
     on State<T>, RouteMotionHoldMixin<T> {

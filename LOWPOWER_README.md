@@ -1,6 +1,6 @@
 # FlClash Low-Power
 
-FlClash 低功耗 Fork，基于 [chen08209/FlClash](https://github.com/chen08209/FlClash) v0.9.1，面向 macOS 长时间后台运行优化。
+FlClash 低功耗 Fork，基于 [chen08209/FlClash](https://github.com/chen08209/FlClash) v0.9.3，面向 macOS 长时间后台运行优化。
 
 ## 合入的 PR
 
@@ -54,6 +54,12 @@ bash macos/packaging/release_arm64.sh
 v0.9.1 上游已提供隐藏窗口暂停轮询、托盘标题去重、连接网速稳定排序及表格列排序；本分支沿用这些实现。
 停止后保留流量 10 秒、macOS 托盘点击切换及 Apple Silicon 打包由本分支保留。
 
+v0.9.3 使用上游的新 Core 协议、prism_ui 和合并后的连接/请求页面，不维护旧协议或旧页面。
+本分支额外保留日志、请求、DNS 和仪表盘的隐藏展示刷新暂停、历史记录环形缓冲、流量调用日志静默、
+Windows 热点共享以及菜单栏文字随系统变暗。记录采集不随页面隐藏停止。
+更新检查和下载使用本 fork 的 release，避免更新回上游原版；macOS 仍由 release 页面手动下载。
+升级后运行完整回归，实际离电功耗另行测量，不由测试通过推断。
+
 ## 编译
 
 需要 Xcode + Flutter 3.47.2 以上（本机固定 3.47.7）+ Go 1.27 + Rust 1.99 以上。macOS 插件使用 Swift Package Manager。
@@ -68,7 +74,7 @@ dart run build_runner build
 bash macos/packaging/release_arm64.sh
 
 # 产物
-dist/macos-arm64/FlClash-0.9.1.app.zip  → FlClash.app
+dist/macos-arm64/FlClash-0.9.3.app.zip  → FlClash.app
 ```
 
 详细环境安装和卸载见 `low-power-doc/`。
@@ -77,12 +83,14 @@ dist/macos-arm64/FlClash-0.9.1.app.zip  → FlClash.app
 
 | 项目 | 上游 | Low-Power Fork |
 |------|------|----------------|
-| 右上角 PRE 标志 | 有 | 无（`APP_ENV=stable`） |
+| 发布渠道 | 正式版与 pre 分开 | 正式版（`APP_ENV=stable`） |
 | 托盘标题去重 | 支持 | 沿用上游实现 |
-| 窗口隐藏时每秒 core IPC | 是 | 暂停 |
+| 隐藏窗口轮询 | 暂停 | 沿用上游实现 |
+| 隐藏页面事件展示刷新 | 持续 | 暂停，返回后读取最新记录 |
+| 满容量历史记录追加 | 移动旧元素 | 环形缓冲，O(1) |
 | 流量日志每秒写入 | 是 | 静默 |
 | 停止代理后流量归零 | 立即 | 延迟 10 秒 |
-| 运行时间上限 | 99:59:59 | 无 |
+| 运行时间上限 | 999:59:59 | 无 |
 | macOS 框架 | 含 x86_64 | Apple Silicon only |
-| TUN auto-detect-interface | JSON 键名错误 | 修复 |
-| TUN IPv6 残留 | 关闭后仍残留 | 清除 |
+| TUN 配置和连接排序 | 上游实现 | 沿用上游实现 |
+| 更新源 | 作者仓库 | 本 fork |

@@ -1,10 +1,12 @@
 import 'dart:async';
 
 import 'package:fl_clash/ui/active_refresh.dart';
-import 'package:fl_clash/ui/inherited.dart';
-import 'package:fl_clash/ui/route_motion_hold.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:material_ui/material_ui.dart';
+import 'package:flutter/widgets.dart';
+import 'package:prism_ui/prism_ui.dart';
+
+import '../helpers/test_app.dart';
+import '../helpers/host_scaffold.dart';
 
 const _delay = Duration(milliseconds: 300);
 
@@ -70,7 +72,7 @@ void main() {
   }) async {
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pumpWidget(
-      MaterialApp(
+      HostApp(
         navigatorKey: navigator,
         home: ValueListenableBuilder(
           valueListenable: active,
@@ -190,7 +192,7 @@ void main() {
   ) async {
     await mount(tester);
     navigator.currentState!.push(
-      MaterialPageRoute<void>(builder: (_) => const Scaffold()),
+      CardPageRoute<void>(builder: (_) => const HostScaffold()),
     );
     await tester.pumpAndSettle();
     source.value = 1;
@@ -227,7 +229,7 @@ void main() {
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     final feedKey = GlobalKey<_FeedState>();
     await tester.pumpWidget(
-      MaterialApp(
+      HostApp(
         home: ValueListenableBuilder(
           valueListenable: active,
           builder: (_, first, child) => Row(
